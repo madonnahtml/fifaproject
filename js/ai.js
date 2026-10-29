@@ -16,7 +16,7 @@ const AI = {
 
       const opp = 1 - t;
       const carrier = b.owner;
-      let presser = null, container = null, chaser = null;
+      let presser = null, container = null, chaser = null, supporter = null;
       const eligible = team.players.filter((p) => p.active && p.human < 0 && p.role !== 'GK' && !p.busy);
       const human = m.humanP[t];
 
@@ -29,6 +29,14 @@ const AI = {
         } else {
           presser = sorted[0];
           if (sorted[1] && U.dist(sorted[1].x, sorted[1].y, carrier.x, carrier.y) < 15) container = sorted[1];
+        }
+      } else if (carrier && carrier.team === t) {
+        // Il compagno piu' vicino si propone per un appoggio sicuro
+        let bd = 22;
+        for (const q of eligible) {
+          if (q === carrier) continue;
+          const d = U.dist(q.x, q.y, carrier.x, carrier.y);
+          if (d < bd) { bd = d; supporter = q; }
         }
       } else if (!carrier) {
         const ib = m.icBest[t];
@@ -46,6 +54,13 @@ const AI = {
         if (p === chaser) { this.goToBall(m, p, dt); this.tryLooseTackle(m, p); continue; }
         if (p === presser) { this.press(m, p, carrier, dt, true); continue; }
         if (p === container) { this.press(m, p, carrier, dt, false); continue; }
+        if (p === supporter) {
+          p.supT = (p.supT || 0) - dt;
+          if (p.supT <= 0 || !p.sup) { p.supT = 0.5; p.sup = this.supportSpot(m, p, carrier); }
+          p.moveTo(p.sup.x, p.sup.y, dt, U.dist(p.x, p.y, p.sup.x, p.sup.y) > 6);
+          continue;
+        }
+        if (p.gaT > 0) p.gaT -= dt;
         const tg = this.fieldTarget(m, p, m.possTeam() === t);
         const d = U.dist(p.x, p.y, tg.x, tg.y);
         p.moveTo(tg.x, tg.y, dt, d > 9 || (p.runT > 0));
@@ -133,23 +148,50 @@ const AI = {
     }
     let wy = byy * dir * (attacking ? 1.05 : 0.72) + b.y * 0.32;
     // Palla nella trequarti: attaccanti e un centrocampista attaccano l'area
+    // In attacco le punte restano almeno all'altezza della palla, le mezzali poco dietro
+    if (attacking && p.role === 'FW') rx = Math.max(rx, brx + 2);
+    if (attacking && p.role === 'MF') rx = Math.max(rx, brx - 8);
     if (attacking && brx > 20 && (p.role === 'FW' || (p.role === 'MF' && Math.abs(byy) < 10))) {
-      const slot = p.role === 'FW' ? (p.idx % 3) : 3;
-      const spots = [[-8, -4], [-6, 3.5], [-11, 0], [-17, 0]];
+      const slot = p.role === 'FW' ? (p.idx % 3) : 3 + (p.idx % 2);
+      const spots = [[-8, -4], [-6, 3.5], [-11, 0], [-17, -5], [-16, 6]];
       const sp = spots[slot];
       rx = CFG.HALF_L + sp[0];
       wy = sp[1] * dir + b.y * 0.15;
     }
+    let limit = 99;
     if (attacking && p.role !== 'DF') {
       const line = m.offsideLineFor(t);
-      const limit = Math.max(line, brx) - 0.5;
-      if (p.runT > 0) rx = Math.min(line + 9, CFG.HALF_L - 6);
+      limit = Math.max(line, brx) - 0.5;
+      // dai e vai: scatto in avanti restando in linea
+      if (p.gaT > 0) rx = Math.max(rx, Math.min(m.rx(t, p.x) + 10, limit));
+      if (p.runT > 0) { rx = Math.min(line + 9, CFG.HALF_L - 6); limit = 99; }
       else rx = Math.min(rx, limit);
       // Ogni tanto un attaccante attacca la profondita'
-      if (p.role === 'FW' && p.runT <= 0 && brx > -15 && Math.random() < 0.004) p.runT = 1.6;
+      if (p.role === 'FW' && p.runT <= 0 && brx > -15 && Math.random() < 0.012) p.runT = 1.6;
     }
     rx = U.clamp(rx, -CFG.HALF_L + 4, CFG.HALF_L - 3);
     let x = rx * dir, y = U.clamp(wy, -CFG.HALF_W + 1.5, CFG.HALF_W - 1.5);
+
+    if (attacking && b.owner && b.owner.team === t && b.owner !== p) {
+      // Smarcarsi: lontano dai difensori e fuori dalle linee di passaggio coperte
+      const c = b.owner;
+      for (const o of m.teams[1 - t].players) {
+        if (!o.active) continue;
+        const d = U.dist(o.x, o.y, x, y);
+        if (d < 5 && d > 0.01) { x += ((x - o.x) / d) * (5 - d) * 0.7; y += ((y - o.y) / d) * (5 - d) * 0.7; }
+        const sd = U.segDist(o.x, o.y, c.x, c.y, x, y);
+        if (sd.d < 1.8 && sd.t > 0.15 && sd.t < 0.92) {
+          const lx = x - c.x, ly = y - c.y, ll = Math.sqrt(lx * lx + ly * ly) || 1;
+          let nx = -ly / ll, ny = lx / ll;
+          if ((o.x - c.x) * nx + (o.y - c.y) * ny > 0) { nx = -nx; ny = -ny; }
+          const k = (1.8 - sd.d) * 1.6 + 1.2;
+          x += nx * k; y += ny * k;
+        }
+      }
+      const rx2 = Math.min(m.rx(t, x), limit);
+      x = U.clamp(rx2, -CFG.HALF_L + 4, CFG.HALF_L - 3) * dir;
+      y = U.clamp(y, -CFG.HALF_W + 1.5, CFG.HALF_W - 1.5);
+    }
 
     if (!attacking && p.role !== 'FW') {
       // Marcatura dell'avversario piu' vicino alla zona, dal lato della porta
@@ -169,6 +211,29 @@ const AI = {
     return { x, y };
   },
 
+  // Punto di appoggio attorno al portatore: linea di passaggio libera, spazio, un po' in avanti.
+  supportSpot(m, p, c) {
+    const t = p.team, dir = m.dir(t);
+    const line = m.offsideLineFor(t);
+    let best = null, bs = -99;
+    for (let a = -110; a <= 110; a += 22) {
+      for (const r of [9, 13]) {
+        const ang = (a * Math.PI) / 180;
+        const x = c.x + Math.cos(ang) * r * dir;
+        const y = c.y + Math.sin(ang) * r;
+        if (Math.abs(y) > CFG.HALF_W - 2 || Math.abs(x) > CFG.HALF_L - 3) continue;
+        const rx = m.rx(t, x);
+        if (rx > line - 0.5 && rx > m.rx(t, c.x)) continue; // niente fuorigioco
+        const safety = this.laneSafety(m, c, x, y, 'ground');
+        let open = 8;
+        for (const o of m.teams[1 - t].players) if (o.active) open = Math.min(open, U.dist(o.x, o.y, x, y));
+        const sc = safety * 1.2 + (open / 8) * 0.8 + ((rx - m.rx(t, c.x)) / 13) * 0.35 - U.dist(p.x, p.y, x, y) * 0.02;
+        if (sc > bs) { bs = sc; best = { x, y }; }
+      }
+    }
+    return best || { x: p.x, y: p.y };
+  },
+
   // ---------- Portatore di palla ----------
   carrier(m, p, dt) {
     if (p.holding) return;
@@ -177,7 +242,7 @@ const AI = {
       p.steer(Math.cos(p.skillDir) * 8, Math.sin(p.skillDir) * 8, dt, 3);
       return;
     }
-    p.thinkT -= dt;
+    p.thinkT -= dt * (1 + m.pressure(p));
     if (p.dribX == null) { const d0 = this.evalDribble(m, p); p.dribX = d0.x; p.dribY = d0.y; p.dribSprint = d0.sprint; }
     if (p.thinkT <= 0) {
       p.thinkT = m.diff.think * U.rand(0.7, 1.3);
@@ -215,7 +280,8 @@ const AI = {
     shotScore += noise(); passScore += noise(); dribScore += noise();
 
     const dGoal = U.dist(p.x, p.y, gx, 0);
-    if (shotScore > 0.42 && (shotScore >= passScore * 0.7 || dGoal < 15)) {
+    const shootMin = dGoal < 18 ? 0.3 : 0.42;
+    if (shotScore > shootMin && (shotScore >= passScore * 0.7 || dGoal < 15)) {
       m.doShoot(p, shot.kind, { goalY: shot.gy }, shot.power);
       return true;
     }
@@ -295,31 +361,35 @@ const AI = {
       if (d < 4 || d > 55) continue;
       if (!offside) {
         if (d < 38) opts.push({ kind: 'ground', x: lx, y: ly, d });
-        if (d > 14) opts.push({ kind: 'lob', x: lx, y: ly, d });
+        if (d > 18) opts.push({ kind: 'lob', x: lx, y: ly, d });
       }
       // Filtrante nello spazio dietro la difesa
       if (q.role !== 'DF' && qrx > prx + 2) {
-        const fx = q.x + m.dir(t) * 8, fy = q.y + q.vy * 0.3;
+        const tp = m.throughPoint(p, q, 0.5);
         const qOff = qrx > line + 0.3 && qrx > 0.5;
-        if (!qOff && m.rx(t, fx) < CFG.HALF_L - 4) opts.push({ kind: 'through', x: fx, y: fy, d: U.dist(p.x, p.y, fx, fy) });
+        if (!qOff && tp) opts.push({ kind: 'through', x: tp.x, y: tp.y, d: U.dist(p.x, p.y, tp.x, tp.y) });
       }
       for (const o of opts) {
         const safety = this.laneSafety(m, p, o.x, o.y, o.kind);
-        if (safety < -0.3) continue;
+        if (safety < (o.kind === 'through' ? -0.12 : -0.02)) continue;
         const prog = (m.rx(t, o.x) - prx) / 30;
         let open = 10;
         for (const e of m.teams[1 - t].players) {
           if (!e.active) continue;
           open = Math.min(open, U.dist(e.x, e.y, o.x, o.y));
         }
-        let s = prog * 0.75 + (open / 10) * 0.45 + safety * 0.55 - o.d / 70;
-        if (o.kind === 'lob') s -= 0.18;
-        if (o.kind === 'through') s += 0.12;
+        let s = prog * 0.75 + (open / 10) * 0.45 + safety * 0.8 - o.d / 70;
+        if (o.kind === 'lob') s -= open > 5 ? 0.12 : 0.4;
+        if (o.kind === 'through') s += m.rx(t, o.x) > line ? 0.15 : -0.05;
+        if (o.kind === 'ground' && o.d < 25) s += 0.1;
         const orx = m.rx(t, o.x);
         if (orx > CFG.HALF_L - 16 && Math.abs(o.y) < 14) s += 0.25;
         // Cross dal fondo
         if (o.kind === 'lob' && prx > CFG.HALF_L - 22 && Math.abs(p.y) > 15 && orx > CFG.HALF_L - 16) s += 0.35;
         if (prx < -20 && orx < prx) s -= 0.15;
+        // Indietro solo se pressato; i lanci servono per avanzare
+        if (orx < prx - 2) s -= 0.25 * (1 - pr);
+        if (o.kind === 'lob' && orx < prx + 8) s -= 0.3;
         s += pr * 0.25;
         if (!best || s > best.score) {
           best = { score: s, recv: q, kind: o.kind, power: o.kind === 'through' ? 0.5 : 0.35, point: o.kind === 'through' ? { x: o.x, y: o.y } : null };
@@ -332,12 +402,25 @@ const AI = {
 
   // Margine di tempo con cui la palla arriva prima degli avversari lungo la traiettoria.
   laneSafety(m, p, tx, ty, kind) {
-    const speed = kind === 'lob' ? 20 : 16;
+    const speed = kind === 'lob' ? 20 : 13; // velocita' media reale (la palla rallenta)
     let worst = 2;
+    if (kind === 'lob') {
+      // Il lancio scavalca chi sta in mezzo: conta chi arriva prima nella zona di atterraggio
+      const T = 0.55 + U.dist(p.x, p.y, tx, ty) / 30 + 0.15;
+      for (const e of m.teams[1 - p.team].players) {
+        if (!e.active) continue;
+        const te = Math.max(0, U.dist(e.x, e.y, tx, ty) - 1.2) / 7 + 0.2;
+        worst = Math.min(worst, te - T);
+      }
+      return U.clamp(worst + 0.15, -1, 1);
+    }
+    // Il ricevitore va incontro alla palla: l'ultimo tratto e' suo
+    const dl = U.dist(p.x, p.y, tx, ty) || 1;
+    const cut = Math.min(3.5, dl * 0.25);
+    tx -= ((tx - p.x) / dl) * cut; ty -= ((ty - p.y) / dl) * cut;
     for (const e of m.teams[1 - p.team].players) {
       if (!e.active) continue;
       const s = U.segDist(e.x, e.y, p.x, p.y, tx, ty);
-      if (kind === 'lob' && s.t < 0.75) continue; // il lancio scavalca chi sta in mezzo
       const tb = (s.t * U.dist(p.x, p.y, tx, ty)) / speed;
       const te = Math.max(0, s.d - 0.6) / 7 + 0.15;
       worst = Math.min(worst, te - tb);
@@ -374,7 +457,8 @@ const AI = {
     const look = 6;
     const x = U.clamp(p.x + dx * look, -CFG.HALF_L + 1, CFG.HALF_L - 1);
     const y = U.clamp(p.y + dy * look, -CFG.HALF_W + 1.5, CFG.HALF_W - 1.5);
-    const score = 0.15 + Math.min(space, 12) / 12 * 0.45 - m.pressure(p) * 0.3;
+    let score = 0.18 + Math.min(space, 15) / 15 * 0.6 - m.pressure(p) * 0.35;
+    if (prx > CFG.HALF_L - 25) score -= 0.1; // vicino all'area meglio cercare il compagno o il tiro
     return { x, y, dx, dy, space, sprint: space > 6, score, blocker };
   },
 

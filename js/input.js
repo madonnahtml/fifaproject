@@ -24,7 +24,10 @@ const Keyboard = {
   onLocalKey: null,   // callback per tasti non di gioco (pausa, radar, audio...)
   init() {
     window.addEventListener('keydown', (e) => {
-      if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT')) return;
+      if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT')) {
+        if (e.code === 'Escape' && this.onLocalKey) this.onLocalKey(e.code);
+        return;
+      }
       const bit = KEYMAP[e.code];
       if (bit) { this.mask |= bit; if (this.gameActive) e.preventDefault(); }
       if (e.code === 'Tab' && this.gameActive) e.preventDefault();

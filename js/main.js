@@ -257,9 +257,15 @@ const App = {
 
   localKey(code) {
     const inGame = this.mode !== 'demo' && !this.screen;
-    if (code === 'Escape' || code === 'KeyP') {
+    if (code === 'Escape' && ['options', 'help', 'setup', 'join', 'host'].includes(this.screen)) {
+      // Esc torna indietro nei menu
+      if (this.screen === 'help') this.show(this.helpReturn || 'menu');
+      else {
+        if (this.screen === 'join' || this.screen === 'host') { Net.close(); this.guestHello = null; }
+        this.show('menu');
+      }
+    } else if (code === 'Escape' || (code === 'KeyP' && !this.screen) || (code === 'KeyP' && this.screen === 'pause')) {
       if (this.screen === 'pause') this.resume();
-      else if (this.screen === 'help' && this.helpReturn === 'pause') this.show('pause');
       else if (inGame) this.pause();
     } else if (code === 'Tab' && inGame) {
       this.renderer.showRadar = !this.renderer.showRadar;

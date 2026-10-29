@@ -40,6 +40,7 @@ class Match {
     this.humanP = [null, null];
     this.charge = [0, 0];
     this.chargeKind = [0, 0];
+    this.passPreview = [null, null];
     this.queued = [null, null];
     this.switchCd = [0, 0];
     this.halfLen = (opts.halfMinutes || 3) * 60;
@@ -248,6 +249,7 @@ class Match {
 
   checkTouches() {
     const b = this.ball;
+    const bs = b.speed();
     let best = null, bestD = 99, bestKind = 0;
     for (const p of this.all) {
       if (!p.canTouch() || p.state === PS.SLIDE) continue;
@@ -266,8 +268,15 @@ class Match {
         if (dh < reach && b.z < hz) { kind = 3; if (dh < bestD) { best = p; bestD = dh; bestKind = kind; } continue; }
       }
       if (p.state === PS.DIVE) continue;
-      if (b.z < 0.75 && d < 0.9) kind = 1;
-      else if (b.z >= 0.75 && b.z < 2.15 && d < 0.7) kind = 2;
+      // Chi va sulla palla (destinatario, inseguitore, giocatore umano) ha piu' portata;
+      // gli altri intercettano solo se la palla passa proprio vicino.
+      const going = b.intended === p || this.icBest[p.team] === p || p.human >= 0;
+      let rf = going ? 0.9 : bs > 15 ? 0.5 : 0.65;
+      let rb = going ? 0.7 : 0.5;
+      // Appena calciata, la palla la ferma solo chi e' proprio sulla traiettoria
+      if (this.time - (this.lastKickTime || -9) < 0.15 && this.lastTouch && this.lastTouch.team !== p.team) { rf = 0.42; rb = 0.42; }
+      if (b.z < 0.75 && d < rf) kind = 1;
+      else if (b.z >= 0.75 && b.z < 2.15 && d < rb) kind = 2;
       if (kind && d < bestD) { best = p; bestD = d; bestKind = kind; }
     }
     if (best) this.touch(best, bestKind);
@@ -285,8 +294,10 @@ class Match {
       return;
     }
     const rvx = b.vx - p.vx, rvy = b.vy - p.vy;
-    const rs = Math.sqrt(rvx * rvx + rvy * rvy + b.vz * b.vz);
+    const rs3 = Math.sqrt(rvx * rvx + rvy * rvy + b.vz * b.vz);
+    const rs = Math.sqrt(rvx * rvx + rvy * rvy) + Math.abs(b.vz) * 0.35;
     const prevTeam = this.lastTouch ? this.lastTouch.team : -1;
+    const wasIntended = b.intended === p;
     this.offsideList = [];
     this.lastTouch = p;
     b.intended = null;
@@ -295,9 +306,9 @@ class Match {
       // Portiere
       const catchLim = 14 + 10 * p.attr.keeping * this.keeperSkill(p.team);
       const fumble = Math.random() > 0.9 + 0.08 * p.attr.keeping;
-      if (rs < catchLim && !fumble && b.z < 2.3) {
+      if (rs3 < catchLim && !fumble && b.z < 2.3) {
         this.gainBall(p, true);
-        if (prevTeam !== p.team && rs > 9) { this.setMsg('PARATA!', 1.4); this.crowd = Math.min(1, this.crowd + 0.25); }
+        if (prevTeam !== p.team && rs3 > 9) { this.setMsg('PARATA!', 1.4); this.crowd = Math.min(1, this.crowd + 0.25); }
       } else {
         // Respinta verso l'esterno
         const out = this.dir(p.team);
@@ -305,7 +316,7 @@ class Match {
         const ang = Math.random() < 0.4
           ? Math.atan2(U.sign(b.y || U.rand(-1, 1)), -out * U.rand(0.1, 0.6))
           : Math.atan2(U.rand(-1, 1), out) + U.gauss() * 0.5;
-        const sp = Math.min(rs * 0.42, 11);
+        const sp = Math.min(rs3 * 0.42, 11);
         b.kick(Math.cos(ang) * sp, Math.sin(ang) * sp, U.rand(0.5, 3.5), 0);
         p.kickCd = 0.35;
         this.ev[0]++;
@@ -318,12 +329,13 @@ class Match {
       // Palla alta: colpo di testa se c'e' un'intenzione, altrimenti stop di petto o deviazione
       const head = this.headerIntent(p);
       if (head) { this.doHeader(p, head); return; }
-      if (rs < 9 + p.attr.dribble * 3) { this.gainBall(p); return; }
+      if (rs < 9 + p.attr.dribble * 3 + (wasIntended ? 5 : 0)) { this.gainBall(p); return; }
       this.deflect(p, rs);
       return;
     }
 
-    const limit = 11 + 10 * p.attr.dribble + (p.human >= 0 ? 3 : 0);
+    // Il destinatario del passaggio e' pronto a riceverlo: stop piu' facile
+    const limit = 11 + 10 * p.attr.dribble + (p.human >= 0 ? 3 : 0) + (wasIntended ? 4 : 0);
     if (rs < limit) {
       this.gainBall(p);
     } else {
@@ -352,7 +364,8 @@ class Match {
     b.intended = null;
     p.holding = !!hands;
     p.holdT = 0;
-    p.thinkT = U.rand(0.25, 0.6) + this.diff.react * 0.5;
+    // Senza pressione si conduce un po' prima di decidere; sotto pressione si decide subito
+    p.thinkT = (this.pressure(p) > 0.5 ? U.rand(0.1, 0.25) : U.rand(0.6, 1.2)) + this.diff.react * 0.4;
     p.dribX = null;
     if (!hands) b.z = 0;
     this.lastTouch = p;
@@ -375,6 +388,8 @@ class Match {
 
   execAction(p, kind, aim, power) {
     if (p.holding) { this.humanPass(p, kind === 1 ? 'ground' : 'lob', aim, power); return; }
+    // Dai e vai: dopo un passaggio corto il centrocampista/attaccante si inserisce
+    if ((kind === 1 || kind === 3) && p.role !== 'DF') p.gaT = 1.8;
     switch (kind) {
       case 1: this.humanPass(p, 'ground', aim, power); break;
       case 2: this.doShoot(p, 'normal', aim, power); break;
@@ -386,22 +401,58 @@ class Match {
   }
 
   // Sceglie il compagno meglio piazzato nella direzione indicata.
+  // Sceglie il compagno nella direzione indicata, preferendo chi e' libero e ha la linea di passaggio pulita.
   findPassTarget(p, aim, kind) {
     const a = this.aimOf(p, aim);
+    const minCos = kind === 'lob' ? 0.6 : 0.5;
+    const maxD = kind === 'lob' ? 65 : kind === 'through' ? 48 : 42;
+    const opp = this.teams[1 - p.team].players;
     let best = null, bestS = -99;
     for (const q of this.teams[p.team].players) {
-      if (q === p || !q.active) continue;
+      if (q === p || !q.active || q.state === PS.DOWN) continue;
       const qx = q.x + q.vx * 0.4, qy = q.y + q.vy * 0.4;
       const dx = qx - p.x, dy = qy - p.y;
       const d = Math.sqrt(dx * dx + dy * dy);
-      if (d < 3) continue;
+      if (d < 3 || d > maxD) continue;
       const cos = (dx * a.x + dy * a.y) / d;
-      const minCos = kind === 'lob' ? 0.72 : 0.62;
       if (cos < minCos) continue;
-      const maxD = kind === 'lob' ? 65 : kind === 'through' ? 45 : 40;
-      if (d > maxD) continue;
-      const s = cos * 2.2 - d / (kind === 'lob' ? 90 : 45);
-      if (s > bestS) { bestS = s; best = q; }
+      let tx = qx, ty = qy;
+      if (kind === 'through') { const tp = this.throughPoint(p, q, 0.5); tx = tp.x; ty = tp.y; }
+      const safety = AI.laneSafety(this, p, tx, ty, kind === 'lob' ? 'lob' : 'ground');
+      let open = 8;
+      for (const e of opp) if (e.active) open = Math.min(open, U.dist(e.x, e.y, tx, ty));
+      const sc = cos * 2.4 - d / (kind === 'lob' ? 110 : 60) + safety * 0.7 + (open / 8) * 0.45;
+      if (sc > bestS) { bestS = sc; best = q; }
+    }
+    return best;
+  }
+
+  // Punto nello spazio per il filtrante: dove il compagno arriva prima dei difensori.
+  throughPoint(p, recv, power) {
+    const t = p.team, fwd = this.dir(t);
+    let lx = fwd, ly = 0;
+    const rs = Math.sqrt(recv.vx * recv.vx + recv.vy * recv.vy);
+    if (rs > 2) { lx = lx * 0.55 + (recv.vx / rs) * 0.45; ly = (recv.vy / rs) * 0.45; }
+    // verso il centro se e' molto largo
+    if (Math.abs(recv.y) > 18) ly -= U.sign(recv.y) * 0.25;
+    const ll = Math.sqrt(lx * lx + ly * ly) || 1;
+    lx /= ll; ly /= ll;
+    const pref = 5 + 10 * Math.min(power || 0, 1);
+    const b = this.ball;
+    const rsp = CFG.SPRINT * (0.9 + recv.attr.speed * 0.14) * 0.92;
+    let best = null, bestS = -99;
+    for (let L = 4; L <= 18; L += 2) {
+      const x = U.clamp(recv.x + lx * L, -CFG.HALF_L + 3, CFG.HALF_L - 3);
+      const y = U.clamp(recv.y + ly * L, -CFG.HALF_W + 2, CFG.HALF_W - 2);
+      const ballT = U.dist(b.x, b.y, x, y) / 13;
+      const recvT = U.dist(recv.x, recv.y, x, y) / rsp + 0.1;
+      let defT = 9;
+      for (const o of this.teams[1 - t].players) {
+        if (!o.active) continue;
+        defT = Math.min(defT, Math.max(0, U.dist(o.x, o.y, x, y) - 0.7) / (CFG.SPRINT * 0.92) + 0.25);
+      }
+      const sc = (defT - Math.max(ballT, recvT)) + L * 0.03 - Math.abs(L - pref) * 0.04;
+      if (sc > bestS) { bestS = sc; best = { x, y }; }
     }
     return best;
   }
@@ -446,13 +497,8 @@ class Match {
         ty = recv.y + recv.vy * tEst * 0.85;
       }
       if (kind === 'through') {
-        const fwd = this.dir(p.team);
-        const rs = Math.sqrt(recv.vx * recv.vx + recv.vy * recv.vy);
-        let lx = fwd, ly = 0;
-        if (rs > 2) { lx = lx * 0.5 + (recv.vx / rs) * 0.5; ly = (recv.vy / rs) * 0.5; }
-        const ll = Math.sqrt(lx * lx + ly * ly) || 1;
-        const lead = 5 + 10 * Math.min(power, 1);
-        tx += (lx / ll) * lead; ty += (ly / ll) * lead;
+        const tp = this.throughPoint(p, recv, power);
+        tx = tp.x; ty = tp.y;
       }
     } else {
       tx = point.x; ty = point.y;
@@ -475,8 +521,10 @@ class Match {
     p.holding = false;
 
     if (kind === 'ground' || kind === 'through') {
-      const vEnd = kind === 'through' ? 2.5 + power * 2 : 4.5 + power * 3.5;
-      const v0 = U.clamp(groundPassSpeed(d, vEnd), 5, 31);
+      // Passaggi tesi: la palla arriva ancora veloce, cosi' e' difficile intercettarla
+      let vEnd = kind === 'through' ? 3 + power * 2.5 : 6.5 + power * 5;
+      if (d < 9) vEnd = Math.min(vEnd, 5 + power * 3);
+      const v0 = U.clamp(groundPassSpeed(d, vEnd), 7, 32);
       b.kick(cx * v0, cy * v0, 0, 0);
     } else if (kind === 'lob' || kind === 'throw' || kind === 'throwhand') {
       if (kind === 'throwhand') {
@@ -684,7 +732,7 @@ class Match {
     if (p.jockey) prob += 0.1;
     if (c.skillT > 0) prob -= 0.5;
     if (behind) prob -= 0.15;
-    if (p.human < 0) prob += (this.diff.aggr - 0.55) * 0.2;
+    if (p.human < 0) prob += (this.diff.aggr - 0.55) * 0.2 - 0.07;
     if (Math.random() < prob) {
       if (Math.random() < 0.55) this.gainBall(p);
       else {
@@ -1110,6 +1158,10 @@ class Match {
     }
     this.charge[s] = Math.min(1, ch / MAX_CHARGE);
     this.chargeKind[s] = kind;
+    // Anteprima del compagno che ricevera' il passaggio
+    const p = this.humanP[s];
+    const pk = kind === 1 ? 'ground' : kind === 3 ? 'through' : kind === 4 ? 'lob' : null;
+    this.passPreview[s] = p && pk && this.ball.owner === p ? this.findPassTarget(p, c.aim(), pk) : null;
   }
 
   autoSwitch(s, dt) {
@@ -1180,7 +1232,10 @@ class Match {
 
     if (c.pressed(K.SWITCH) && !carrier) this.switchPlayer(s);
     const hp = this.humanP[s];
-    this.moveHuman(s, hp, dt, true);
+    this.passPreview[s] = null;
+    // Se il passaggio e' per te e non tocchi le frecce, il giocatore va incontro alla palla da solo
+    if (!b.owner && b.intended === hp && !c.dir().any && !hp.busy) AI.goToBall(this, hp, dt);
+    else this.moveHuman(s, hp, dt, true);
     if (hp.busy) { this.charge[s] = 0; return; }
     p = hp;
 
@@ -1322,6 +1377,10 @@ class Match {
       fd: Math.round(this.fade * 100),
       rp: 0,
       me: [this.teams[0].mentality, this.teams[1].mentality],
+      pt: [0, 1].map((s) => {
+        const q = this.passPreview[s] || (this.humans[s] && b.intended && b.intended.team === s ? b.intended : null);
+        return q ? q.team * 11 + q.idx : -1;
+      }),
       dr: this.teams[0].dir,
     };
   }

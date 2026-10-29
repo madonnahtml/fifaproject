@@ -44,6 +44,11 @@ Su alcune reti molto chiuse (scuola, aziende) il collegamento diretto può non r
 
 Premendo `J`, `K`, `I`... **prima che arrivi la palla** fai un passaggio o un tiro **di prima** (o un colpo di testa se la palla è alta).
 
+Mentre tieni premuto `J`, `L` o `I`, un **anello tratteggiato** mostra quale compagno riceverà il passaggio:
+il gioco sceglie, nella direzione che indichi, il compagno più libero e con la linea di passaggio pulita.
+Se il passaggio è per te e non tocchi le frecce, il giocatore va incontro alla palla da solo.
+Nei menu `Esc` torna indietro.
+
 ## Regole e meccaniche incluse
 - Calcio d'inizio, rimesse laterali, calci d'angolo, rinvii dal fondo, punizioni con barriera, rigori.
 - Fuorigioco, falli (soprattutto scivolate da dietro), cartellini gialli e rossi con espulsione.

@@ -397,6 +397,23 @@ class Renderer {
   drawMarkers(snap, info, opts) {
     const ctx = this.ctx;
     const h = 1.85 * this.ppm * STICK_SCALE;
+    // Compagno che ricevera' il passaggio: anello tratteggiato
+    for (let s = 0; s < 2; s++) {
+      const ti = snap.pt ? snap.pt[s] : -1;
+      if (ti == null || ti < 0 || ti === snap.hp[s]) continue;
+      const o = ti * 7;
+      const X = this.sx(snap.p[o] / 100), Y = this.sy(snap.p[o + 1] / 100);
+      const pulse = 0.85 + Math.sin((snap.tm || 0) * 10) * 0.12;
+      ctx.save();
+      ctx.strokeStyle = SIDE_COLORS[s]; ctx.lineWidth = Math.max(2, this.ppm * 0.07);
+      ctx.setLineDash([5, 4]);
+      ctx.beginPath(); ctx.ellipse(X, Y, 0.75 * this.ppm * pulse, 0.75 * this.ppm * TILT * pulse, 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = SIDE_COLORS[s];
+      const top = Y - h - 6;
+      ctx.beginPath(); ctx.arc(X, top, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    }
     for (let s = 0; s < 2; s++) {
       const gi = snap.hp[s];
       if (gi == null || gi < 0) continue;
@@ -423,6 +440,9 @@ class Renderer {
         const kindCol = ['#fff', '#7CFC00', '#ff4040', '#00e5ff', '#ffd000', '#ff8cff', '#ffa040'][snap.ck[s]] || '#fff';
         ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(X - bw / 2 - 2, Y + 8, bw + 4, 9);
         ctx.fillStyle = kindCol; ctx.fillRect(X - bw / 2, Y + 10, bw * ch, 5);
+        const kindName = ['', 'PASSAGGIO', 'TIRO', 'FILTRANTE', 'LANCIO', 'A GIRO', 'PALLONETTO'][snap.ck[s]] || '';
+        ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+        outlineText(ctx, kindName, X, Y + 26, kindCol, 2.5);
       }
       const stam = snap.st[s] / 100;
       ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(X - bw / 2 - 1, Y + 19, bw + 2, 4);
