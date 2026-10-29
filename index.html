@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Stick Calcio 27</title>
+  <meta name="description" content="Calcio 2D 11 contro 11 con omini stilizzati: contro l'IA o online con un amico tramite codice stanza.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='28' fill='white' stroke='black' stroke-width='4'/%3E%3Cpolygon points='32,20 43,28 39,41 25,41 21,28' fill='black'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <!-- Caricamento -->
+  <div id="loading" class="screen show">
+    <div class="logo">STICK<span>CALCIO</span><small>27</small></div>
+    <div class="bar"><div id="load-fill"></div></div>
+    <div id="load-text">Caricamento...</div>
+  </div>
+
+  <!-- Menu principale -->
+  <div id="menu" class="screen">
+    <div class="panel">
+      <div class="logo">STICK<span>CALCIO</span><small>27</small></div>
+      <p class="sub">Calcio 2D 11 contro 11 • contro l'IA o online con un amico</p>
+      <button class="big" data-go="setup">⚽ Gioca contro l'IA</button>
+      <button class="big" data-go="host">🌐 Crea stanza online</button>
+      <button class="big" data-go="join">🔑 Entra con codice</button>
+      <div class="row">
+        <button data-go="help">🎮 Comandi</button>
+        <button data-go="options">⚙️ Opzioni</button>
+      </div>
+      <p class="tiny">Progetto amatoriale: squadre e giocatori inventati.</p>
+    </div>
+  </div>
+
+  <!-- Impostazioni partita contro IA -->
+  <div id="setup" class="screen">
+    <div class="panel wide">
+      <h2>Partita contro l'IA</h2>
+      <div class="cols">
+        <div class="team-card" id="setup-team0">
+          <h3>La tua squadra</h3>
+          <label>Nome <input maxlength="14" class="tname" value="Stickmen FC"></label>
+          <label>Maglia</label><div class="swatches"></div>
+          <label>Modulo <select class="tform"><option>4-4-2</option><option>4-3-3</option><option>3-5-2</option></select></label>
+        </div>
+        <div class="team-card" id="setup-team1">
+          <h3>Avversario (IA)</h3>
+          <label>Nome <input maxlength="14" class="tname" value="Atletico Linea"></label>
+          <label>Maglia</label><div class="swatches"></div>
+          <label>Modulo <select class="tform"><option>4-3-3</option><option>4-4-2</option><option>3-5-2</option></select></label>
+        </div>
+      </div>
+      <div class="cols opts">
+        <label>Difficoltà
+          <select id="setup-diff"><option value="0">Facile</option><option value="1" selected>Normale</option><option value="2">Difficile</option><option value="3">Leggenda</option></select>
+        </label>
+        <label>Durata di ogni tempo
+          <select id="setup-len"><option value="2">2 minuti</option><option value="3" selected>3 minuti</option><option value="4">4 minuti</option><option value="6">6 minuti</option><option value="10">10 minuti</option></select>
+        </label>
+      </div>
+      <div class="row">
+        <button data-go="menu">← Indietro</button>
+        <button class="primary" id="setup-start">Calcio d'inizio!</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stanza online: host -->
+  <div id="host" class="screen">
+    <div class="panel wide">
+      <h2>Stanza online</h2>
+      <p>Manda questo codice al tuo amico. Lui deve scegliere <b>Entra con codice</b> e scriverlo.</p>
+      <div class="code-box"><span id="host-code">-----</span><button id="host-copy" title="Copia">📋 Copia</button></div>
+      <p id="host-status" class="status">Creo la stanza...</p>
+      <div class="cols">
+        <div class="team-card" id="host-team">
+          <h3>La tua squadra (G1)</h3>
+          <label>Nome <input maxlength="14" class="tname" value="Squadra Casa"></label>
+          <label>Maglia</label><div class="swatches"></div>
+          <label>Modulo <select class="tform"><option>4-4-2</option><option>4-3-3</option><option>3-5-2</option></select></label>
+        </div>
+        <div class="team-card" id="host-guest">
+          <h3>Il tuo amico (G2)</h3>
+          <p id="host-guest-info" class="muted">Non ancora collegato</p>
+        </div>
+      </div>
+      <div class="cols opts">
+        <label>Durata di ogni tempo
+          <select id="host-len"><option value="2">2 minuti</option><option value="3" selected>3 minuti</option><option value="4">4 minuti</option><option value="6">6 minuti</option><option value="10">10 minuti</option></select>
+        </label>
+      </div>
+      <div class="row">
+        <button data-go="menu" data-leave="1">← Esci</button>
+        <button class="primary" id="host-start" disabled>Avvia la partita</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stanza online: entra -->
+  <div id="join" class="screen">
+    <div class="panel wide">
+      <h2>Entra con codice</h2>
+      <label class="code-input">Codice stanza <input id="join-code" maxlength="5" placeholder="ES. K7Q2A" autocomplete="off"></label>
+      <div class="team-card" id="join-team">
+        <h3>La tua squadra (G2)</h3>
+        <label>Nome <input maxlength="14" class="tname" value="Squadra Ospite"></label>
+        <label>Maglia</label><div class="swatches"></div>
+        <label>Modulo <select class="tform"><option>4-3-3</option><option>4-4-2</option><option>3-5-2</option></select></label>
+      </div>
+      <p id="join-status" class="status"></p>
+      <div class="row">
+        <button data-go="menu" data-leave="1">← Indietro</button>
+        <button class="primary" id="join-go">Entra</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Comandi -->
+  <div id="help" class="screen">
+    <div class="panel wide">
+      <h2>Comandi da tastiera</h2>
+      <div class="cols help">
+        <div>
+          <h3>In attacco (con la palla)</h3>
+          <table>
+            <tr><td><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / frecce</td><td>Movimento e mira</td></tr>
+            <tr><td><kbd>Shift</kbd></td><td>Scatto (consuma stamina)</td></tr>
+            <tr><td><kbd>J</kbd></td><td>Passaggio rasoterra (tieni = più forte)</td></tr>
+            <tr><td><kbd>L</kbd></td><td>Passaggio filtrante nello spazio</td></tr>
+            <tr><td><kbd>I</kbd></td><td>Lancio / cross (tieni = più lungo)</td></tr>
+            <tr><td><kbd>K</kbd></td><td>Tiro: tieni per caricare, rilascia</td></tr>
+            <tr><td><kbd>O</kbd></td><td>Tiro a giro (a effetto)</td></tr>
+            <tr><td><kbd>U</kbd></td><td>Pallonetto</td></tr>
+            <tr><td><kbd>E</kbd> (tieni)</td><td>Protezione palla</td></tr>
+            <tr><td><kbd>F</kbd></td><td>Finta / dribbling laterale</td></tr>
+            <tr><td><kbd>Spazio</kbd></td><td>Allungo: spingi la palla avanti</td></tr>
+          </table>
+        </div>
+        <div>
+          <h3>In difesa</h3>
+          <table>
+            <tr><td><kbd>J</kbd></td><td>Contrasto in piedi</td></tr>
+            <tr><td><kbd>K</kbd></td><td>Scivolata (attento ai falli!)</td></tr>
+            <tr><td><kbd>E</kbd> (tieni)</td><td>Contenimento (jockey)</td></tr>
+            <tr><td><kbd>L</kbd> (tieni)</td><td>Pressing del compagno</td></tr>
+            <tr><td><kbd>I</kbd> (tieni)</td><td>Uscita del portiere</td></tr>
+            <tr><td><kbd>Q</kbd></td><td>Cambia giocatore (+ direzione)</td></tr>
+          </table>
+          <h3>Altro</h3>
+          <table>
+            <tr><td><kbd>R</kbd></td><td>Mentalità: difensiva / equilibrata / offensiva</td></tr>
+            <tr><td>Premi un tasto prima che arrivi la palla</td><td>Passaggio o tiro di prima / colpo di testa</td></tr>
+            <tr><td><kbd>Tab</kbd></td><td>Mostra / nascondi radar</td></tr>
+            <tr><td><kbd>M</kbd></td><td>Audio sì / no</td></tr>
+            <tr><td><kbd>Esc</kbd> / <kbd>P</kbd></td><td>Pausa</td></tr>
+            <tr><td><kbd>H</kbd></td><td>Questa schermata</td></tr>
+          </table>
+        </div>
+      </div>
+      <div class="row"><button class="primary" id="help-back">OK</button></div>
+    </div>
+  </div>
+
+  <!-- Opzioni -->
+  <div id="options" class="screen">
+    <div class="panel">
+      <h2>Opzioni</h2>
+      <label>Qualità grafica
+        <select id="opt-quality"><option value="1">Normale (PC lenti)</option><option value="2">Alta (schermi nitidi)</option></select>
+      </label>
+      <label class="check"><input type="checkbox" id="opt-fps"> Mostra FPS</label>
+      <label class="check"><input type="checkbox" id="opt-radar" checked> Radar in basso</label>
+      <div class="row"><button class="primary" data-go="menu">OK</button></div>
+    </div>
+  </div>
+
+  <!-- Pausa -->
+  <div id="pause" class="screen">
+    <div class="panel">
+      <h2 id="pause-title">Pausa</h2>
+      <button class="big" id="pause-resume">▶ Riprendi</button>
+      <button class="big" id="pause-help">🎮 Comandi</button>
+      <button class="big" id="pause-quit">⏏ Esci dalla partita</button>
+    </div>
+  </div>
+
+  <!-- Fine partita -->
+  <div id="result" class="screen">
+    <div class="panel wide">
+      <h2>Fischio finale</h2>
+      <div id="result-score" class="result-score"></div>
+      <div id="result-scorers" class="scorers"></div>
+      <table id="result-stats" class="stats"></table>
+      <div class="row">
+        <button id="result-menu">Menu</button>
+        <button class="primary" id="result-again">Rivincita</button>
+      </div>
+      <p id="result-wait" class="muted"></p>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+
+  <script src="js/lib/peerjs.min.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/util.js"></script>
+  <script src="js/input.js"></script>
+  <script src="js/ball.js"></script>
+  <script src="js/player.js"></script>
+  <script src="js/ai.js"></script>
+  <script src="js/match.js"></script>
+  <script src="js/render.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/net.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
